@@ -343,7 +343,8 @@ impl Socks5ServerNet {
     ) -> Self {
         let mut forward_tasks = JoinSet::new();
         let mut cap = smoltcp::phy::DeviceCapabilities::default();
-        cap.max_transmission_unit = 1284; // 1284 - 20 can be divided by 8 (fragment offset unit)
+        cap.max_transmission_unit = 1500; // 1500 - 20 can be divided by 8 (fragment offset unit)
+        cap.max_burst_size = Some(512);
         cap.medium = smoltcp::phy::Medium::Ip;
         let (dev, stack_sink, mut stack_stream) = channel_device::ChannelDevice::new(cap);
 
@@ -398,7 +399,10 @@ impl Socks5ServerNet {
                 Some(BufferSize {
                     tcp_rx_size: 1024 * 128,
                     tcp_tx_size: 1024 * 128,
-                    ..Default::default()
+                    udp_rx_size: 1024 * 1024 * 2,
+                    udp_tx_size: 1024 * 1024,
+                    udp_rx_meta_size: 2048,
+                    udp_tx_meta_size: 1024,
                 }),
             ),
         );
@@ -571,7 +575,7 @@ impl Socks5Server {
         peer_manager: Arc<PeerManager>,
         auth: Option<SimpleUserPassword>,
     ) -> Arc<Self> {
-        let (packet_sender, packet_recv) = mpsc::channel(1024);
+        let (packet_sender, packet_recv) = mpsc::channel(4096);
         Arc::new(Self {
             global_ctx,
             peer_manager: Arc::downgrade(&peer_manager),
@@ -890,9 +894,8 @@ impl Socks5Server {
             .insert(cfg.clone(), cancel_token.clone().drop_guard());
 
         self.tasks.lock().unwrap().spawn(async move {
+            let mut buf = vec![0u8; 8192];
             loop {
-                // we set the max buffer size of smoltcp to 8192, so we need to use a buffer size that is less than 8192 here.
-                let mut buf = vec![0u8; 8192];
                 let (len, addr) = select! {
                     biased;
                     _ = cancel_token.cancelled() => {
@@ -996,8 +999,8 @@ impl Socks5Server {
                         udp_forward_task.insert(
                             udp_client_key.clone(),
                             AbortOnDropHandle::new(tokio::spawn(async move {
+                                let mut buf = vec![0u8; 8192];
                                 loop {
-                                    let mut buf = vec![0u8; 8192];
                                     match socks_udp.recv_from(&mut buf).await {
                                         Ok((len, dst_addr)) => {
                                             tracing::trace!(
