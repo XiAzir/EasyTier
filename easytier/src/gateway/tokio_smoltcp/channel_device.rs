@@ -28,8 +28,8 @@ impl ChannelDevice {
     ///
     /// The `caps` is used to determine the device capabilities. `DeviceCapabilities::max_transmission_unit` must be set.
     pub fn new(caps: DeviceCapabilities) -> ChannelDeviceNewRet {
-        let (tx1, rx1) = channel(1000);
-        let (tx2, rx2) = channel(1000);
+        let (tx1, rx1) = channel(4096);
+        let (tx2, rx2) = channel(4096);
         (
             ChannelDevice {
                 send: PollSender::new(tx1),
